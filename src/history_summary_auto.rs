@@ -1236,37 +1236,14 @@ pub async fn maybe_summarize_and_compact(
     }
   };
 
-  let template = if hs.use_history_summary_new {
-    hs.summary_node_request_message_template_new.clone()
-  } else {
-    hs.summary_node_request_message_template.clone()
-  };
-
-  let history_end = if hs.use_history_summary_new {
-    tail
-      .iter()
-      .map(|h| {
-        let request_nodes: Vec<NodeIn> = exchange_request_nodes(h).cloned().collect();
-        let response_nodes: Vec<NodeIn> = exchange_response_nodes(h).cloned().collect();
-        serde_json::json!({
-          "request_id": h.request_id,
-          "request_message": h.request_message,
-          "response_text": h.response_text,
-          "request_nodes": request_nodes,
-          "response_nodes": response_nodes,
-        })
-      })
-      .collect::<Vec<_>>()
-  } else {
-    Vec::new()
-  };
+  let template = hs.summary_node_request_message_template.clone();
 
   let summary_node = serde_json::json!({
     "summary_text": summary_text,
     "summarization_request_id": summarization_request_id,
     "history_beginning_dropped_num_exchanges": num_dropped_in_beginning,
     "history_middle_abridged_text": abridged_history_text,
-    "history_end": history_end,
+    "history_end": [],
     "message_template": template,
   });
 
@@ -1285,14 +1262,9 @@ pub async fn maybe_summarize_and_compact(
     structured_output_nodes: Vec::new(),
   };
 
-  let new_history = if hs.use_history_summary_new {
-    vec![summary_item]
-  } else {
-    let mut v = Vec::with_capacity(1 + tail.len());
-    v.push(summary_item);
-    v.extend(tail);
-    v
-  };
+  let mut new_history = Vec::with_capacity(1 + tail.len());
+  new_history.push(summary_item);
+  new_history.extend(tail);
 
   let after_chars = estimate_history_size_chars(&new_history);
   info!(

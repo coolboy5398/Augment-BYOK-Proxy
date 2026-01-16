@@ -350,7 +350,7 @@ mod tests {
   use crate::protocol::{ToolResultNode, TOOL_RESULT_CONTENT_NODE_TEXT};
 
   #[test]
-  fn renders_history_summary_template_new() {
+  fn renders_history_summary_template() {
     let v = serde_json::json!({
       "summary_text": "SUM",
       "summarization_request_id": "req_123",

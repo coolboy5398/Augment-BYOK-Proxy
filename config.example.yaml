@@ -92,8 +92,6 @@ history_summary:
   max_summarization_input_chars: 250000
   # 滚动摘要：首次全量摘要，后续只对“新增片段”做增量更新（降低摘要调用成本）
   rolling_summary: true
-  # 使用官方 new 模板字段（{middle_part_abridged}/{end_part_full}）；默认 false 使用 old 模板（更适合“summary + raw tail”混合策略）
-  use_history_summary_new: false
   # 摘要 prompt：默认内置 Codex 风格；如需更强约束可在此覆盖
   # prompt: |
   #   ...

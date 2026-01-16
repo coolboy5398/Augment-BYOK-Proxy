@@ -739,6 +739,9 @@ fn push_history_messages(
     history.response_text.clone()
   };
   let assistant_content = build_assistant_content_blocks(&assistant_text, out_nodes)?;
+  let has_tool_use = assistant_content
+    .iter()
+    .any(|b| b.block_type == "tool_use");
   if !assistant_content.is_empty() {
     out.push(AnthropicMessage {
       role: "assistant".to_string(),
@@ -747,17 +750,19 @@ fn push_history_messages(
   }
 
   if let Some(next) = all.get(index + 1) {
-    let next_req_nodes = next
-      .request_nodes
-      .iter()
-      .chain(&next.structured_request_nodes)
-      .chain(&next.nodes);
-    let tool_results = build_tool_results(next_req_nodes)?;
-    if !tool_results.is_empty() {
-      out.push(AnthropicMessage {
-        role: "user".to_string(),
-        content: tool_results,
-      });
+    if has_tool_use {
+      let next_req_nodes = next
+        .request_nodes
+        .iter()
+        .chain(&next.structured_request_nodes)
+        .chain(&next.nodes);
+      let tool_results = build_tool_results(next_req_nodes)?;
+      if !tool_results.is_empty() {
+        out.push(AnthropicMessage {
+          role: "user".to_string(),
+          content: tool_results,
+        });
+      }
     }
   }
 
@@ -2358,6 +2363,152 @@ mod tests {
       RESPONSE_NODE_MAIN_TEXT_FINISHED
     );
     assert_eq!(finals[0].nodes[0].content, "hello");
+  }
+
+  #[test]
+  fn anthropic_history_does_not_emit_orphan_tool_results() {
+    let provider = AnthropicProviderConfig {
+      id: "p1".to_string(),
+      base_url: "https://api.anthropic.com/v1".to_string(),
+      api_key: "sk-ant-dummy".to_string(),
+      default_model: "claude-sonnet-4-20250514".to_string(),
+      max_tokens: 8192,
+      timeout_seconds: 120,
+      thinking: ThinkingConfig {
+        enabled: false,
+        budget_tokens: 0,
+      },
+      extra_headers: BTreeMap::new(),
+    };
+
+    let history = vec![
+      AugmentChatHistory {
+        response_text: String::new(),
+        request_message: "[PREVIOUS_SUMMARY]\nS\n[/PREVIOUS_SUMMARY]".to_string(),
+        request_id: "r0".to_string(),
+        request_nodes: Vec::new(),
+        structured_request_nodes: Vec::new(),
+        nodes: Vec::new(),
+        response_nodes: Vec::new(),
+        structured_output_nodes: Vec::new(),
+      },
+      AugmentChatHistory {
+        response_text: "done".to_string(),
+        request_message: "-".to_string(),
+        request_id: "r1".to_string(),
+        request_nodes: vec![make_tool_result_node(1, "tool-1")],
+        structured_request_nodes: Vec::new(),
+        nodes: Vec::new(),
+        response_nodes: Vec::new(),
+        structured_output_nodes: Vec::new(),
+      },
+    ];
+
+    let augment = AugmentRequest {
+      model: None,
+      chat_history: history,
+      message: "hi".to_string(),
+      agent_memories: String::new(),
+      mode: "CHAT".to_string(),
+      prefix: String::new(),
+      selected_code: String::new(),
+      suffix: String::new(),
+      diff: String::new(),
+      lang: String::new(),
+      path: String::new(),
+      user_guidelines: String::new(),
+      workspace_guidelines: String::new(),
+      rules: Value::Null,
+      tool_definitions: Vec::new(),
+      nodes: Vec::new(),
+      structured_request_nodes: Vec::new(),
+      request_nodes: Vec::new(),
+      conversation_id: None,
+      context: None,
+    };
+
+    let out = convert_augment_to_anthropic(&provider, &augment, "m".to_string()).unwrap();
+
+    let has_tool_result = out
+      .messages
+      .iter()
+      .flat_map(|m| m.content.iter())
+      .any(|b| b.block_type == "tool_result");
+    assert_eq!(has_tool_result, false);
+  }
+
+  #[test]
+  fn anthropic_history_emits_tool_results_after_tool_use() {
+    let provider = AnthropicProviderConfig {
+      id: "p1".to_string(),
+      base_url: "https://api.anthropic.com/v1".to_string(),
+      api_key: "sk-ant-dummy".to_string(),
+      default_model: "claude-sonnet-4-20250514".to_string(),
+      max_tokens: 8192,
+      timeout_seconds: 120,
+      thinking: ThinkingConfig {
+        enabled: false,
+        budget_tokens: 0,
+      },
+      extra_headers: BTreeMap::new(),
+    };
+
+    let history = vec![
+      AugmentChatHistory {
+        response_text: String::new(),
+        request_message: "please run a tool".to_string(),
+        request_id: "r0".to_string(),
+        request_nodes: Vec::new(),
+        structured_request_nodes: Vec::new(),
+        nodes: Vec::new(),
+        response_nodes: vec![make_tool_use_node(1, "tool-1")],
+        structured_output_nodes: Vec::new(),
+      },
+      AugmentChatHistory {
+        response_text: "done".to_string(),
+        request_message: "-".to_string(),
+        request_id: "r1".to_string(),
+        request_nodes: vec![make_tool_result_node(1, "tool-1")],
+        structured_request_nodes: Vec::new(),
+        nodes: Vec::new(),
+        response_nodes: Vec::new(),
+        structured_output_nodes: Vec::new(),
+      },
+    ];
+
+    let augment = AugmentRequest {
+      model: None,
+      chat_history: history,
+      message: "hi".to_string(),
+      agent_memories: String::new(),
+      mode: "CHAT".to_string(),
+      prefix: String::new(),
+      selected_code: String::new(),
+      suffix: String::new(),
+      diff: String::new(),
+      lang: String::new(),
+      path: String::new(),
+      user_guidelines: String::new(),
+      workspace_guidelines: String::new(),
+      rules: Value::Null,
+      tool_definitions: Vec::new(),
+      nodes: Vec::new(),
+      structured_request_nodes: Vec::new(),
+      request_nodes: Vec::new(),
+      conversation_id: None,
+      context: None,
+    };
+
+    let out = convert_augment_to_anthropic(&provider, &augment, "m".to_string()).unwrap();
+
+    let tool_result_blocks: Vec<&AnthropicContentBlock> = out
+      .messages
+      .iter()
+      .flat_map(|m| m.content.iter())
+      .filter(|b| b.block_type == "tool_result")
+      .collect();
+    assert_eq!(tool_result_blocks.len(), 1);
+    assert_eq!(tool_result_blocks[0].tool_use_id.as_deref(), Some("tool-1"));
   }
 
   #[test]
